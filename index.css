@@ -1,0 +1,38 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+#wrapper {
+  height: 100%;
+  position: relative;
+}
+
+/* GENERAL CLASSES */
+
+.inactive {
+  background: #ECF0F1;
+}
+
+.active {
+  background: #26A65B;
+}
+
+.centre {
+  transform: translate(-50%, -50%);
+  left: 50%;
+  top: 50%;
+  position: absolute;
+}
+
+/* CELLULAR AUTOMATON */
+#automaton {
+}
+
+.cell {
+  padding: 0.5em;
+  margin: 0.2em;
+  float: right;
+}
