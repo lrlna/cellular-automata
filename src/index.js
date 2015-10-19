@@ -3,7 +3,7 @@ var cells;
 document.addEventListener("DOMContentLoaded", function() {
   cells = document.querySelectorAll(".cell");
   setRandom();
-  window.setTimeout(nextTurn, 1000);
+  changeStates();
 })
 
 var setRandom = function() {
@@ -11,6 +11,16 @@ var setRandom = function() {
     var number = getRandomInteger(0, 1);
     setActiveCells(number, cell);
   })
+}
+
+var changeStates = function() {
+  for (var i = 1; i < 15; i++) {
+    handleTimeout(i);
+  }
+}
+
+function handleTimeout(i) {
+  setTimeout(nextTurn, i*1000);
 }
 
 var nextTurn = function() {
