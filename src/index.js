@@ -1,11 +1,13 @@
 var cells; 
 
+// let the games begin!
 document.addEventListener("DOMContentLoaded", function() {
   cells = document.querySelectorAll(".cell");
   setRandom();
   changeStates();
 })
 
+// random initial state;
 var setRandom = function() {
   [].forEach.call(cells, function(cell) {
     var number = getRandomInteger(0, 1);
@@ -13,16 +15,14 @@ var setRandom = function() {
   })
 }
 
+// change the states periodically;
 var changeStates = function() {
   for (var i = 1; i < 15; i++) {
     handleTimeout(i);
   }
 }
 
-function handleTimeout(i) {
-  setTimeout(nextTurn, i*1000);
-}
-
+// next state;
 var nextTurn = function() {
   [].forEach.call(cells, function(cell) {
     var right = cell.nextElementSibling;
@@ -31,6 +31,7 @@ var nextTurn = function() {
   })  
 }
 
+// follow rule 110 for finding out what to do with the cell;
 function rule110(cell, right, left) {
   var cellActive = checkIfActive(cell);
   if (right) {
@@ -47,6 +48,11 @@ function rule110(cell, right, left) {
   } else if (!leftActive && !cellActive && rightActive) {
     toggleClass(cell, "inactive", "active");
   }
+}
+
+// GENERAL FUNCTIONS;
+function handleTimeout(i) {
+  setTimeout(nextTurn, i*1000);
 }
 
 function toggleClass(element, removeClass, addClass) {
