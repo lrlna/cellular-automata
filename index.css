@@ -34,5 +34,5 @@ body {
 .cell {
   padding: 0.5em;
   margin: 0.2em;
-  float: right;
+  float: left;
 }

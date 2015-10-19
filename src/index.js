@@ -3,7 +3,7 @@ var cells;
 document.addEventListener("DOMContentLoaded", function() {
   cells = document.querySelectorAll(".cell");
   setRandom();
-  window.setTimeout(changeStates, 5000);
+  window.setTimeout(nextTurn, 1000);
 })
 
 var setRandom = function() {
@@ -13,8 +13,35 @@ var setRandom = function() {
   })
 }
 
-var changeStates = function() {
-  
+var nextTurn = function() {
+  [].forEach.call(cells, function(cell) {
+    var right = cell.nextElementSibling;
+    var left = cell.previousElementSibling;
+    rule110(cell, right, left);
+  })  
+}
+
+function rule110(cell, right, left) {
+  var cellActive = checkIfActive(cell);
+  if (right) {
+    var rightActive = checkIfActive(right);
+  };
+  if (left) {
+    var leftActive = checkIfActive(left);
+  }
+
+  if (leftActive && cellActive && rightActive) {
+    toggleClass(cell, "active", "inactive");
+  } else if (leftActive && !cellActive && rightActive) {
+    toggleClass(cell, "inactive", "active");
+  } else if (!leftActive && !cellActive && rightActive) {
+    toggleClass(cell, "inactive", "active");
+  }
+}
+
+function toggleClass(element, removeClass, addClass) {
+  element.classList.remove(removeClass);
+  element.classList.add(addClass)
 }
 
 function setActiveCells(number, cell) {
@@ -23,6 +50,10 @@ function setActiveCells(number, cell) {
   } else {
     cell.classList.add("inactive");
   }
+}
+
+function checkIfActive(cell) {
+  return cell.classList.contains("active");
 }
 
 function getRandomInteger(min, max) {
