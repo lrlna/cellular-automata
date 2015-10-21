@@ -17,6 +17,12 @@ var setRandom = function() {
 
 // change the states periodically;
 var changeStates = function() {
+  var row = cells[0].parentNode;
+  var newCells = row.cloneNode(true); 
+  var body = document.getElementById("automaton");
+  cells = row.children;
+  console.log(cells);
+  body.appendChild(newCells);
   for (var i = 1; i < 15; i++) {
     handleTimeout(i);
   }
