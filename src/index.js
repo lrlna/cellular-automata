@@ -17,19 +17,14 @@ var setRandom = function() {
 
 // change the states periodically;
 var changeStates = function() {
-  var row = cells[0].parentNode;
-  var newCells = row.cloneNode(true); 
-  var body = document.getElementById("automaton");
-  cells = row.children;
-  console.log(cells);
-  body.appendChild(newCells);
-  for (var i = 1; i < 15; i++) {
+  for (var i = 1; i < 100; i++) {
     handleTimeout(i);
   }
 }
 
 // next state;
 var nextTurn = function() {
+  duplicateCells();
   [].forEach.call(cells, function(cell) {
     var right = cell.nextElementSibling;
     var left = cell.previousElementSibling;
@@ -56,9 +51,18 @@ function rule110(cell, right, left) {
   }
 }
 
+function duplicateCells() {
+  var row = cells[0].parentNode;
+  var newCells = row.cloneNode(true); 
+  var body = document.getElementById("automaton");
+  // duplicate cells are now the new cells -- BAMMMMM;
+  cells = newCells.children;
+  body.appendChild(newCells);
+}
+
 // GENERAL FUNCTIONS;
 function handleTimeout(i) {
-  setTimeout(nextTurn, i*1000);
+  setTimeout(nextTurn, i*500);
 }
 
 function toggleClass(element, removeClass, addClass) {
