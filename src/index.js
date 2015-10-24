@@ -33,15 +33,23 @@ var nextTurn = function() {
 }
 
 // follow rule 110 for finding out what to do with the cell;
-function rule110(cell, right, left) {
-  var cellActive = checkIfActive(cell);
-  if (right) {
-    var rightActive = checkIfActive(right);
-  };
-  if (left) {
+var rule110 = function(cell, right, left) {
+  var rightActive, leftActive, cellActive;
+  // check if argument cells are active;
+  cellActive = checkIfActive(cell);
+  if (right === null) {
+    rightActive = null;
+  } else {
+    rightActive = checkIfActive(right);
+  }
+
+  if (left === null) {
+    leftActive = null;
+  } else {
     var leftActive = checkIfActive(left);
   }
 
+  // change based on (in)active;
   if (leftActive && cellActive && rightActive) {
     toggleClass(cell, "active", "inactive");
   } else if (leftActive && !cellActive && rightActive) {
@@ -51,7 +59,7 @@ function rule110(cell, right, left) {
   }
 }
 
-function duplicateCells() {
+var duplicateCells = function() {
   var row = cells[0].parentNode;
   var newCells = row.cloneNode(true); 
   var body = document.getElementById("automaton");
