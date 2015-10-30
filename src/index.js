@@ -1,15 +1,16 @@
 var cells; 
+var parentCells;
 
 // let the games begin!
 document.addEventListener("DOMContentLoaded", function() {
-  cells = document.querySelectorAll(".cell");
+  parentCells = document.querySelectorAll(".cell");
   setRandom();
   changeStates();
 })
 
 // random initial state;
 var setRandom = function() {
-  [].forEach.call(cells, function(cell) {
+  [].forEach.call(parentCells, function(cell) {
     var number = getRandomInteger(0, 1);
     setActiveCells(number, cell);
   })
@@ -25,42 +26,40 @@ var changeStates = function() {
 // next state;
 var nextTurn = function() {
   duplicateCells();
-  [].forEach.call(cells, function(cell) {
-    var right = cell.nextElementSibling;
-    var left = cell.previousElementSibling;
-    rule110(cell, right, left);
+  getSiblingCells(function() {
+    // current cells become parent cells; 
+    parentCells = cells; 
+  })
+}
+
+var getSiblingCells = function(done) {
+  [].forEach.call(parentCells, function(parentCell, index) {
+    var right = parentCell.nextElementSibling;
+    var left = parentCell.previousElementSibling;
+    rule110(parentCell, right, left, index);
   })  
+  done()
 }
 
 // follow rule 110 for finding out what to do with the cell;
-var rule110 = function(cell, right, left) {
-  var rightActive, leftActive, cellActive;
+var rule110 = function(parentCell, right, left, currentIndex) {
   // check if argument cells are active;
-  cellActive = checkIfActive(cell);
-  if (right === null) {
-    rightActive = null;
-  } else {
-    rightActive = checkIfActive(right);
-  }
-
-  if (left === null) {
-    leftActive = null;
-  } else {
-    var leftActive = checkIfActive(left);
-  }
+  var cellActive = checkIfActive(parentCell);
+  var rightActive = checkIfActive(right);
+  var leftActive = checkIfActive(left);
 
   // change based on (in)active;
   if (leftActive && cellActive && rightActive) {
-    toggleClass(cell, "active", "inactive");
+    toggleClass(cells[currentIndex], "active", "inactive");
   } else if (leftActive && !cellActive && rightActive) {
-    toggleClass(cell, "inactive", "active");
+    toggleClass(cells[currentIndex], "inactive", "active");
   } else if (!leftActive && !cellActive && rightActive) {
-    toggleClass(cell, "inactive", "active");
+    toggleClass(cells[currentIndex], "inactive", "active");
   }
 }
 
 var duplicateCells = function() {
-  var row = cells[0].parentNode;
+  var row = parentCells[0].parentNode;
   var newCells = row.cloneNode(true); 
   var body = document.getElementById("automaton");
   // duplicate cells are now the new cells -- BAMMMMM;
@@ -70,7 +69,7 @@ var duplicateCells = function() {
 
 // GENERAL FUNCTIONS;
 function handleTimeout(i) {
-  setTimeout(nextTurn, i*500);
+  setTimeout(nextTurn, i*100);
 }
 
 function toggleClass(element, removeClass, addClass) {
@@ -87,7 +86,13 @@ function setActiveCells(number, cell) {
 }
 
 function checkIfActive(cell) {
-  return cell.classList.contains("active");
+  var active;
+  if (cell) {
+    active = cell.classList.contains("active") ? true : false;
+  } else {
+    active = false;
+  }
+  return active;
 }
 
 function getRandomInteger(min, max) {

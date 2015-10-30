@@ -62,8 +62,8 @@ a {
 
 /* CELLULAR AUTOMATON */
 .cell {
-  padding: 0.5em;
-  margin: 0.2em;
+  padding: 0.3em;
+  margin: 0.1em;
   float: left;
   font-size: 1em;
 }
