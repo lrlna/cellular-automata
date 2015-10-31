@@ -20,8 +20,15 @@ a {
   position: relative;
 }
 
+#content {
+  margin: 1%;
+}
+
 #about {
   font-size: 2em;
+  margin: 3% auto 3%;
+  padding-right: 0.5em;
+  padding-left: 0.5em;
 }
 
 .description {
@@ -30,11 +37,6 @@ a {
 }
 
 /* GENERAL CLASSES */
-.align {
-  margin: 5%;
-  position: absolute;
-}
-
 .active {
   background: #26A65B;
 }
@@ -44,10 +46,8 @@ a {
 }
 
 .centre {
-  /*transform: translate(-50%, -50%);*/
-  left: 3%;
-  top: 50%;
-  position: absolute;
+  padding-left: 1em;
+  padding-right: 1em;
 }
 
 .italic {
