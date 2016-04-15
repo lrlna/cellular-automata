@@ -45,9 +45,9 @@ a {
   background: #ECF0F1;
 }
 
-.centre {
-  padding-left: 1em;
-  padding-right: 1em;
+.row {
+  display: flex;
+  justify-content: space-between;
 }
 
 .italic {
