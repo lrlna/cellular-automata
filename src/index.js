@@ -18,7 +18,7 @@ var setRandom = function() {
 
 // change the states periodically;
 var changeStates = function() {
-  for (var i = 1; i < 100; i++) {
+  for (var i = 1; i < 300; i++) {
     handleTimeout(i);
   }
 }
