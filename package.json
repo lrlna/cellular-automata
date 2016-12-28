@@ -1,0 +1,19 @@
+{
+  "name": "cellular-automata",
+  "version": "1.0.0",
+  "description": "Elementary cellular automata in vanilla.js. This particular one follows Wolfram's [Rule 110](http://atlas.wolfram.com/01/01/110/) given a random initial condition and 100 generations.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lrlna/cellular-automata.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/lrlna/cellular-automata/issues"
+  },
+  "homepage": "https://github.com/lrlna/cellular-automata#readme"
+}
