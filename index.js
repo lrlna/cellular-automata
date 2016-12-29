@@ -11,27 +11,24 @@ var app = choo()
 
 app.model({
   state: {
-    generation: '' 
+    generation: "generation",
+    year: [],
+    cell: null 
   },
   reducers: {
     run: function (state, data) {
+      return { generation: data}
+    }
+  },
+  effects: {
+    automata: function (state, data, send, done) {
       var automaton = olivaw.set(101, data)
-      var automata = olivaw.run(200, automaton)
-      var life = html`<div></div>`
-
-      automata.forEach(function (year) {
-        var yr = html`<div class="year"></div>` 
-
-        year.forEach(function (cell) {
-          var single = html`<div class=${cell.state}></div>`
-          yr.appendChild(single)
-        })
-
-        life.appendChild(yr)
+      var automata = olivaw.run(20, automaton)
+      
+      send('run', automata, function(err, val) {
+        if (err) return done(err)
+        done(null, val)
       })
-
-      return { generation: life }
-
     }
   }
 })
@@ -50,15 +47,25 @@ function mainView (state, prev, send) {
               <small id="rule-desc" class="f6 black-60 db mb2">A rule number between 0 to 256.</small>
               <input type="submit" class="dn">
           </form>
-          <div class="automata">${state.generation}</div>
+          <div>${getGeneration(state, prev, send)}</div>
         </div>
       </main>
     </body>
   `
   function runAutomata (e) {
     e.preventDefault()
-    send('run', e.target[0].value)
+    send('automata', e.target[0].value)
   }
+}
+
+function getGeneration (state, prev, send) {
+  // need to iterate over the generation and get individual year
+  // and cell state
+  return html`
+    <div class="year">
+      <div class="cell"></div>
+    </div>
+  `
 }
 
 app.router(['/', mainView])
