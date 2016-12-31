@@ -41,13 +41,14 @@ function mainView (state, prev, send) {
       <main class="pa4">
         <div class=${style}>
           <form class="black-80" onsubmit=${runAutomata}>
-            <div class="measure"
+            <div class="measure">
               <label for="rule" class="f6 b db mb2">Rule</label>
               <input id="rule" class=${inputBoxClass} type="text">
               <small id="rule-desc" class="f6 black-60 db mb2">A rule number between 0 to 256.</small>
               <input type="submit" class="dn">
+            </div>
           </form>
-          <div>${getGeneration(state, prev, send)}</div>
+          <div class="generation">${getGeneration(state, prev, send)}</div>
         </div>
       </main>
     </body>
@@ -59,13 +60,19 @@ function mainView (state, prev, send) {
 }
 
 function getGeneration (state, prev, send) {
-  // need to iterate over the generation and get individual year
-  // and cell state
-  return html`
-    <div class="year">
-      <div class="cell"></div>
-    </div>
-  `
+  if (!Array.isArray(state.generation)) return
+  state.generation.forEach(function (year) {
+    console.log(year)
+    getYear(year)
+  })
+}
+
+function getYear (year) {
+  return html`<div class="year">${getCell(year)}</div>`
+}
+
+function getCell (year) {
+  return html`<div class=${year.state}></div>`
 }
 
 app.router(['/', mainView])
