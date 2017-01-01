@@ -11,24 +11,19 @@ var app = choo()
 
 app.model({
   state: {
-    generation: "generation",
-    year: [],
-    cell: null 
+    generation: [],
   },
   reducers: {
     run: function (state, data) {
-      return { generation: data}
+      return { generation: data }
     }
   },
   effects: {
     automata: function (state, data, send, done) {
       var automaton = olivaw.set(101, data)
-      var automata = olivaw.run(20, automaton)
+      var automata = olivaw.run(200, automaton)
       
-      send('run', automata, function(err, val) {
-        if (err) return done(err)
-        done(null, val)
-      })
+      send('run', automata, done)
     }
   }
 })
@@ -43,8 +38,8 @@ function mainView (state, prev, send) {
           <form class="black-80" onsubmit=${runAutomata}>
             <div class="measure">
               <label for="rule" class="f6 b db mb2">Rule</label>
-              <input id="rule" class=${inputBoxClass} type="text">
-              <small id="rule-desc" class="f6 black-60 db mb2">A rule number between 0 to 256.</small>
+              <input class=${inputBoxClass} type="text">
+              <small class="f6 black-60 db mb2">A rule number between 0 to 256.</small>
               <input type="submit" class="dn">
             </div>
           </form>
@@ -60,19 +55,16 @@ function mainView (state, prev, send) {
 }
 
 function getGeneration (state, prev, send) {
-  if (!Array.isArray(state.generation)) return
-  state.generation.forEach(function (year) {
-    console.log(year)
-    getYear(year)
-  })
+  if (!Array.isArray(state.generation)) return null
+  return state.generation.map(getYear)
 }
 
 function getYear (year) {
-  return html`<div class="year">${getCell(year)}</div>`
+  return html`<div class="year">${year.map(getCell)}</div>`
 }
 
-function getCell (year) {
-  return html`<div class=${year.state}></div>`
+function getCell (cell) {
+  return html`<div class=${cell.state}></div>`
 }
 
 app.router(['/', mainView])
