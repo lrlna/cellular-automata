@@ -68,7 +68,7 @@ function getCell (cell) {
   return html`<div class=${cell.state}></div>`
 }
 
-app.router(['/cellular-automata', mainView])
+app.router(['/', mainView])
 mount('body', app.start())
 
 },{"choo":"/Users/lrlna/developer/cellular-automata/node_modules/choo/index.js","choo/html":"/Users/lrlna/developer/cellular-automata/node_modules/choo/html.js","choo/mount":"/Users/lrlna/developer/cellular-automata/node_modules/choo/mount.js","olivaw":"/Users/lrlna/developer/olivaw/index.js","sheetify/insert":"/Users/lrlna/developer/cellular-automata/node_modules/browserify/lib/_empty.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/assert/assert.js":[function(require,module,exports){
