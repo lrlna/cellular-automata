@@ -6,7 +6,8 @@
   "scripts": {
     "build": "bankai build -O",
     "start": "bankai start",
-    "test": "standard"
+    "test": "standard",
+    "publish": "npm build && gh-pages -d dist/"
   },
   "repository": {
     "type": "git",
@@ -16,9 +17,11 @@
   "license": "MIT",
   "dependencies": {
     "choo": "^4.0.3",
+    "olivaw": "^1.0.2",
     "tachyons": "^4.6.1"
   },
   "devDependencies": {
-    "bankai": "^5.2.0"
+    "bankai": "^5.2.0",
+    "gh-pages": "^0.12.0"
   }
 }
