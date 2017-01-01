@@ -71,7 +71,479 @@ function getCell (cell) {
 app.router(['/cellular-automata/', mainView])
 mount('body', app.start())
 
-},{"choo":"/Users/lrlna/developer/cellular-automata/node_modules/choo/index.js","choo/html":"/Users/lrlna/developer/cellular-automata/node_modules/choo/html.js","choo/mount":"/Users/lrlna/developer/cellular-automata/node_modules/choo/mount.js","olivaw":"/Users/lrlna/developer/cellular-automata/node_modules/olivaw/index.js","sheetify/insert":"/Users/lrlna/developer/cellular-automata/node_modules/browserify/lib/_empty.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/assert/assert.js":[function(require,module,exports){
+},{"choo":"/Users/lrlna/developer/cellular-automata/node_modules/choo/index.js","choo/html":"/Users/lrlna/developer/cellular-automata/node_modules/choo/html.js","choo/mount":"/Users/lrlna/developer/cellular-automata/node_modules/choo/mount.js","olivaw":"/Users/lrlna/developer/cellular-automata/node_modules/olivaw/index.js","sheetify/insert":"/Users/lrlna/developer/cellular-automata/node_modules/browserify/lib/_empty.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/barracks/apply-hook.js":[function(require,module,exports){
+module.exports = applyHook
+
+// apply arguments onto an array of functions, useful for hooks
+// (arr, any?, any?, any?, any?, any?) -> null
+function applyHook (arr, arg1, arg2, arg3, arg4, arg5) {
+  arr.forEach(function (fn) {
+    fn(arg1, arg2, arg3, arg4, arg5)
+  })
+}
+
+},{}],"/Users/lrlna/developer/cellular-automata/node_modules/barracks/index.js":[function(require,module,exports){
+var mutate = require('xtend/mutable')
+var nanotick = require('nanotick')
+var assert = require('assert')
+var xtend = require('xtend')
+
+var applyHook = require('./apply-hook')
+
+module.exports = dispatcher
+
+// initialize a new barracks instance
+// obj -> obj
+function dispatcher (hooks) {
+  hooks = hooks || {}
+  assert.equal(typeof hooks, 'object', 'barracks: hooks should be undefined or an object')
+
+  var onStateChangeHooks = []
+  var onActionHooks = []
+  var onErrorHooks = []
+
+  var subscriptionWraps = []
+  var initialStateWraps = []
+  var reducerWraps = []
+  var effectWraps = []
+
+  use(hooks)
+
+  var reducersCalled = false
+  var effectsCalled = false
+  var stateCalled = false
+  var subsCalled = false
+  var stopped = false
+
+  var subscriptions = start._subscriptions = {}
+  var reducers = start._reducers = {}
+  var effects = start._effects = {}
+  var models = start._models = []
+  var _state = {}
+
+  var tick = nanotick()
+
+  start.model = setModel
+  start.state = getState
+  start.start = start
+  start.stop = stop
+  start.use = use
+
+  return start
+
+  // push an object of hooks onto an array
+  // obj -> null
+  function use (hooks) {
+    assert.equal(typeof hooks, 'object', 'barracks.use: hooks should be an object')
+    assert.ok(!hooks.onError || typeof hooks.onError === 'function', 'barracks.use: onError should be undefined or a function')
+    assert.ok(!hooks.onAction || typeof hooks.onAction === 'function', 'barracks.use: onAction should be undefined or a function')
+    assert.ok(!hooks.onStateChange || typeof hooks.onStateChange === 'function', 'barracks.use: onStateChange should be undefined or a function')
+
+    if (hooks.onStateChange) onStateChangeHooks.push(hooks.onStateChange)
+    if (hooks.onError) onErrorHooks.push(wrapOnError(hooks.onError))
+    if (hooks.onAction) onActionHooks.push(hooks.onAction)
+    if (hooks.wrapSubscriptions) subscriptionWraps.push(hooks.wrapSubscriptions)
+    if (hooks.wrapInitialState) initialStateWraps.push(hooks.wrapInitialState)
+    if (hooks.wrapReducers) reducerWraps.push(hooks.wrapReducers)
+    if (hooks.wrapEffects) effectWraps.push(hooks.wrapEffects)
+    if (hooks.models) hooks.models.forEach(setModel)
+  }
+
+  // push a model to be initiated
+  // obj -> null
+  function setModel (model) {
+    assert.equal(typeof model, 'object', 'barracks.store.model: model should be an object')
+    models.push(model)
+  }
+
+  // get the current state from the store
+  // obj? -> obj
+  function getState (opts) {
+    opts = opts || {}
+    assert.equal(typeof opts, 'object', 'barracks.store.state: opts should be an object')
+
+    var state = opts.state
+    if (!opts.state && opts.freeze === false) return xtend(_state)
+    else if (!opts.state) return Object.freeze(xtend(_state))
+    assert.equal(typeof state, 'object', 'barracks.store.state: state should be an object')
+
+    var namespaces = []
+    var newState = {}
+
+    // apply all fields from the model, and namespaced fields from the passed
+    // in state
+    models.forEach(function (model) {
+      var ns = model.namespace
+      namespaces.push(ns)
+      var modelState = model.state || {}
+      if (ns) {
+        newState[ns] = newState[ns] || {}
+        apply(ns, modelState, newState)
+        newState[ns] = xtend(newState[ns], state[ns])
+      } else {
+        mutate(newState, modelState)
+      }
+    })
+
+    // now apply all fields that weren't namespaced from the passed in state
+    Object.keys(state).forEach(function (key) {
+      if (namespaces.indexOf(key) !== -1) return
+      newState[key] = state[key]
+    })
+
+    var tmpState = xtend(_state, xtend(state, newState))
+    var wrappedState = wrapHook(tmpState, initialStateWraps)
+
+    return (opts.freeze === false)
+      ? wrappedState
+      : Object.freeze(wrappedState)
+  }
+
+  // initialize the store hooks, get the send() function
+  // obj? -> fn
+  function start (opts) {
+    opts = opts || {}
+    assert.equal(typeof opts, 'object', 'barracks.store.start: opts should be undefined or an object')
+
+    // register values from the models
+    models.forEach(function (model) {
+      var ns = model.namespace
+      if (!stateCalled && model.state && opts.state !== false) {
+        var modelState = model.state || {}
+        if (ns) {
+          _state[ns] = _state[ns] || {}
+          apply(ns, modelState, _state)
+        } else {
+          mutate(_state, modelState)
+        }
+      }
+      if (!reducersCalled && model.reducers && opts.reducers !== false) {
+        apply(ns, model.reducers, reducers, function (cb) {
+          return wrapHook(cb, reducerWraps)
+        })
+      }
+      if (!effectsCalled && model.effects && opts.effects !== false) {
+        apply(ns, model.effects, effects, function (cb) {
+          return wrapHook(cb, effectWraps)
+        })
+      }
+      if (!subsCalled && model.subscriptions && opts.subscriptions !== false) {
+        apply(ns, model.subscriptions, subscriptions, function (cb, key) {
+          var send = createSend('subscription: ' + (ns ? ns + ':' + key : key))
+          cb = wrapHook(cb, subscriptionWraps)
+          cb(send, function (err) {
+            applyHook(onErrorHooks, err, _state, createSend)
+          })
+          return cb
+        })
+      }
+    })
+
+    // the state wrap is special because we want to operate on the full
+    // state rather than indvidual chunks, so we apply it outside the loop
+    if (!stateCalled && opts.state !== false) {
+      _state = wrapHook(_state, initialStateWraps)
+    }
+
+    if (!opts.noSubscriptions) subsCalled = true
+    if (!opts.noReducers) reducersCalled = true
+    if (!opts.noEffects) effectsCalled = true
+    if (!opts.noState) stateCalled = true
+
+    if (!onErrorHooks.length) onErrorHooks.push(wrapOnError(defaultOnError))
+
+    return createSend
+
+    // call an action from a view
+    // (str, bool?) -> (str, any?, fn?) -> null
+    function createSend (selfName, callOnError) {
+      assert.equal(typeof selfName, 'string', 'barracks.store.start.createSend: selfName should be a string')
+      assert.ok(!callOnError || typeof callOnError === 'boolean', 'barracks.store.start.send: callOnError should be undefined or a boolean')
+
+      return function send (name, data, cb) {
+        if (!cb && !callOnError) {
+          cb = data
+          data = null
+        }
+        data = (typeof data === 'undefined' ? null : data)
+
+        assert.equal(typeof name, 'string', 'barracks.store.start.send: name should be a string')
+        assert.ok(!cb || typeof cb === 'function', 'barracks.store.start.send: cb should be a function')
+
+        var done = callOnError ? onErrorCallback : cb
+        _send(name, data, selfName, done)
+
+        function onErrorCallback (err) {
+          err = err || null
+          if (err) {
+            applyHook(onErrorHooks, err, _state, function createSend (selfName) {
+              return function send (name, data) {
+                assert.equal(typeof name, 'string', 'barracks.store.start.send: name should be a string')
+                data = (typeof data === 'undefined' ? null : data)
+                _send(name, data, selfName, done)
+              }
+            })
+          }
+        }
+      }
+    }
+
+    // call an action
+    // (str, str, any, fn) -> null
+    function _send (name, data, caller, cb) {
+      if (stopped) return
+
+      assert.equal(typeof name, 'string', 'barracks._send: name should be a string')
+      assert.equal(typeof caller, 'string', 'barracks._send: caller should be a string')
+      assert.equal(typeof cb, 'function', 'barracks._send: cb should be a function')
+
+      ;(tick(function () {
+        var reducersCalled = false
+        var effectsCalled = false
+        var newState = xtend(_state)
+
+        if (onActionHooks.length) {
+          applyHook(onActionHooks, _state, data, name, caller, createSend)
+        }
+
+        // validate if a namespace exists. Namespaces are delimited by ':'.
+        var actionName = name
+        if (/:/.test(name)) {
+          var arr = name.split(':')
+          var ns = arr.shift()
+          actionName = arr.join(':')
+        }
+
+        var _reducers = ns ? reducers[ns] : reducers
+        if (_reducers && _reducers[actionName]) {
+          if (ns) {
+            var reducedState = _reducers[actionName](_state[ns], data)
+            newState[ns] = xtend(_state[ns], reducedState)
+          } else {
+            mutate(newState, reducers[actionName](_state, data))
+          }
+          reducersCalled = true
+          if (onStateChangeHooks.length) {
+            applyHook(onStateChangeHooks, newState, data, _state, actionName, createSend)
+          }
+          _state = newState
+          cb(null, newState)
+        }
+
+        var _effects = ns ? effects[ns] : effects
+        if (!reducersCalled && _effects && _effects[actionName]) {
+          var send = createSend('effect: ' + name)
+          if (ns) _effects[actionName](_state[ns], data, send, cb)
+          else _effects[actionName](_state, data, send, cb)
+          effectsCalled = true
+        }
+
+        if (!reducersCalled && !effectsCalled) {
+          throw new Error('Could not find action ' + actionName)
+        }
+      }))()
+    }
+  }
+
+  // stop an app, essentially turns
+  // all send() calls into no-ops.
+  // () -> null
+  function stop () {
+    stopped = true
+  }
+}
+
+// compose an object conditionally
+// optionally contains a namespace
+// which is used to nest properties.
+// (str, obj, obj, fn?) -> null
+function apply (ns, source, target, wrap) {
+  if (ns && !target[ns]) target[ns] = {}
+  Object.keys(source).forEach(function (key) {
+    var cb = wrap ? wrap(source[key], key) : source[key]
+    if (ns) target[ns][key] = cb
+    else target[key] = cb
+  })
+}
+
+// handle errors all the way at the top of the trace
+// err? -> null
+function defaultOnError (err) {
+  throw err
+}
+
+function wrapOnError (onError) {
+  return function onErrorWrap (err, state, createSend) {
+    if (err) onError(err, state, createSend)
+  }
+}
+
+// take a apply an array of transforms onto a value. The new value
+// must be returned synchronously from the transform
+// (any, [fn]) -> any
+function wrapHook (value, transforms) {
+  transforms.forEach(function (transform) {
+    value = transform(value)
+  })
+  return value
+}
+
+},{"./apply-hook":"/Users/lrlna/developer/cellular-automata/node_modules/barracks/apply-hook.js","assert":"/Users/lrlna/developer/cellular-automata/node_modules/browserify/node_modules/assert/assert.js","nanotick":"/Users/lrlna/developer/cellular-automata/node_modules/nanotick/index.js","xtend":"/Users/lrlna/developer/cellular-automata/node_modules/xtend/immutable.js","xtend/mutable":"/Users/lrlna/developer/cellular-automata/node_modules/xtend/mutable.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/bel/index.js":[function(require,module,exports){
+var document = require('global/document')
+var hyperx = require('hyperx')
+var onload = require('on-load')
+
+var SVGNS = 'http://www.w3.org/2000/svg'
+var XLINKNS = 'http://www.w3.org/1999/xlink'
+
+var BOOL_PROPS = {
+  autofocus: 1,
+  checked: 1,
+  defaultchecked: 1,
+  disabled: 1,
+  formnovalidate: 1,
+  indeterminate: 1,
+  readonly: 1,
+  required: 1,
+  selected: 1,
+  willvalidate: 1
+}
+var SVG_TAGS = [
+  'svg',
+  'altGlyph', 'altGlyphDef', 'altGlyphItem', 'animate', 'animateColor',
+  'animateMotion', 'animateTransform', 'circle', 'clipPath', 'color-profile',
+  'cursor', 'defs', 'desc', 'ellipse', 'feBlend', 'feColorMatrix',
+  'feComponentTransfer', 'feComposite', 'feConvolveMatrix', 'feDiffuseLighting',
+  'feDisplacementMap', 'feDistantLight', 'feFlood', 'feFuncA', 'feFuncB',
+  'feFuncG', 'feFuncR', 'feGaussianBlur', 'feImage', 'feMerge', 'feMergeNode',
+  'feMorphology', 'feOffset', 'fePointLight', 'feSpecularLighting',
+  'feSpotLight', 'feTile', 'feTurbulence', 'filter', 'font', 'font-face',
+  'font-face-format', 'font-face-name', 'font-face-src', 'font-face-uri',
+  'foreignObject', 'g', 'glyph', 'glyphRef', 'hkern', 'image', 'line',
+  'linearGradient', 'marker', 'mask', 'metadata', 'missing-glyph', 'mpath',
+  'path', 'pattern', 'polygon', 'polyline', 'radialGradient', 'rect',
+  'set', 'stop', 'switch', 'symbol', 'text', 'textPath', 'title', 'tref',
+  'tspan', 'use', 'view', 'vkern'
+]
+
+function belCreateElement (tag, props, children) {
+  var el
+
+  // If an svg tag, it needs a namespace
+  if (SVG_TAGS.indexOf(tag) !== -1) {
+    props.namespace = SVGNS
+  }
+
+  // If we are using a namespace
+  var ns = false
+  if (props.namespace) {
+    ns = props.namespace
+    delete props.namespace
+  }
+
+  // Create the element
+  if (ns) {
+    el = document.createElementNS(ns, tag)
+  } else {
+    el = document.createElement(tag)
+  }
+
+  // If adding onload events
+  if (props.onload || props.onunload) {
+    var load = props.onload || function () {}
+    var unload = props.onunload || function () {}
+    onload(el, function belOnload () {
+      load(el)
+    }, function belOnunload () {
+      unload(el)
+    },
+    // We have to use non-standard `caller` to find who invokes `belCreateElement`
+    belCreateElement.caller.caller.caller)
+    delete props.onload
+    delete props.onunload
+  }
+
+  // Create the properties
+  for (var p in props) {
+    if (props.hasOwnProperty(p)) {
+      var key = p.toLowerCase()
+      var val = props[p]
+      // Normalize className
+      if (key === 'classname') {
+        key = 'class'
+        p = 'class'
+      }
+      // The for attribute gets transformed to htmlFor, but we just set as for
+      if (p === 'htmlFor') {
+        p = 'for'
+      }
+      // If a property is boolean, set itself to the key
+      if (BOOL_PROPS[key]) {
+        if (val === 'true') val = key
+        else if (val === 'false') continue
+      }
+      // If a property prefers being set directly vs setAttribute
+      if (key.slice(0, 2) === 'on') {
+        el[p] = val
+      } else {
+        if (ns) {
+          if (p === 'xlink:href') {
+            el.setAttributeNS(XLINKNS, p, val)
+          } else if (/^xmlns($|:)/i.test(p)) {
+            // skip xmlns definitions
+          } else {
+            el.setAttributeNS(null, p, val)
+          }
+        } else {
+          el.setAttribute(p, val)
+        }
+      }
+    }
+  }
+
+  function appendChild (childs) {
+    if (!Array.isArray(childs)) return
+    for (var i = 0; i < childs.length; i++) {
+      var node = childs[i]
+      if (Array.isArray(node)) {
+        appendChild(node)
+        continue
+      }
+
+      if (typeof node === 'number' ||
+        typeof node === 'boolean' ||
+        node instanceof Date ||
+        node instanceof RegExp) {
+        node = node.toString()
+      }
+
+      if (typeof node === 'string') {
+        if (el.lastChild && el.lastChild.nodeName === '#text') {
+          el.lastChild.nodeValue += node
+          continue
+        }
+        node = document.createTextNode(node)
+      }
+
+      if (node && node.nodeType) {
+        el.appendChild(node)
+      }
+    }
+  }
+  appendChild(children)
+
+  return el
+}
+
+module.exports = hyperx(belCreateElement)
+module.exports.default = module.exports
+module.exports.createElement = belCreateElement
+
+},{"global/document":"/Users/lrlna/developer/cellular-automata/node_modules/global/document.js","hyperx":"/Users/lrlna/developer/cellular-automata/node_modules/hyperx/index.js","on-load":"/Users/lrlna/developer/cellular-automata/node_modules/on-load/index.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/browser-resolve/empty.js":[function(require,module,exports){
+
+},{}],"/Users/lrlna/developer/cellular-automata/node_modules/browserify/lib/_empty.js":[function(require,module,exports){
+arguments[4]["/Users/lrlna/developer/cellular-automata/node_modules/browser-resolve/empty.js"][0].apply(exports,arguments)
+},{}],"/Users/lrlna/developer/cellular-automata/node_modules/browserify/node_modules/assert/assert.js":[function(require,module,exports){
 // http://wiki.commonjs.org/wiki/Unit_Testing/1.0
 //
 // THIS IS NOT TESTED NOR LIKELY TO WORK OUTSIDE V8!
@@ -432,478 +904,188 @@ var objectKeys = Object.keys || function (obj) {
   return keys;
 };
 
-},{"util/":"/Users/lrlna/developer/cellular-automata/node_modules/util/util.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/barracks/apply-hook.js":[function(require,module,exports){
-module.exports = applyHook
+},{"util/":"/Users/lrlna/developer/cellular-automata/node_modules/util/util.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/browserify/node_modules/process/browser.js":[function(require,module,exports){
+// shim for using process in browser
+var process = module.exports = {};
 
-// apply arguments onto an array of functions, useful for hooks
-// (arr, any?, any?, any?, any?, any?) -> null
-function applyHook (arr, arg1, arg2, arg3, arg4, arg5) {
-  arr.forEach(function (fn) {
-    fn(arg1, arg2, arg3, arg4, arg5)
-  })
+// cached from whatever global is present so that test runners that stub it
+// don't break things.  But we need to wrap it in a try catch in case it is
+// wrapped in strict mode code which doesn't define any globals.  It's inside a
+// function because try/catches deoptimize in certain engines.
+
+var cachedSetTimeout;
+var cachedClearTimeout;
+
+function defaultSetTimout() {
+    throw new Error('setTimeout has not been defined');
 }
-
-},{}],"/Users/lrlna/developer/cellular-automata/node_modules/barracks/index.js":[function(require,module,exports){
-var mutate = require('xtend/mutable')
-var nanotick = require('nanotick')
-var assert = require('assert')
-var xtend = require('xtend')
-
-var applyHook = require('./apply-hook')
-
-module.exports = dispatcher
-
-// initialize a new barracks instance
-// obj -> obj
-function dispatcher (hooks) {
-  hooks = hooks || {}
-  assert.equal(typeof hooks, 'object', 'barracks: hooks should be undefined or an object')
-
-  var onStateChangeHooks = []
-  var onActionHooks = []
-  var onErrorHooks = []
-
-  var subscriptionWraps = []
-  var initialStateWraps = []
-  var reducerWraps = []
-  var effectWraps = []
-
-  use(hooks)
-
-  var reducersCalled = false
-  var effectsCalled = false
-  var stateCalled = false
-  var subsCalled = false
-  var stopped = false
-
-  var subscriptions = start._subscriptions = {}
-  var reducers = start._reducers = {}
-  var effects = start._effects = {}
-  var models = start._models = []
-  var _state = {}
-
-  var tick = nanotick()
-
-  start.model = setModel
-  start.state = getState
-  start.start = start
-  start.stop = stop
-  start.use = use
-
-  return start
-
-  // push an object of hooks onto an array
-  // obj -> null
-  function use (hooks) {
-    assert.equal(typeof hooks, 'object', 'barracks.use: hooks should be an object')
-    assert.ok(!hooks.onError || typeof hooks.onError === 'function', 'barracks.use: onError should be undefined or a function')
-    assert.ok(!hooks.onAction || typeof hooks.onAction === 'function', 'barracks.use: onAction should be undefined or a function')
-    assert.ok(!hooks.onStateChange || typeof hooks.onStateChange === 'function', 'barracks.use: onStateChange should be undefined or a function')
-
-    if (hooks.onStateChange) onStateChangeHooks.push(hooks.onStateChange)
-    if (hooks.onError) onErrorHooks.push(wrapOnError(hooks.onError))
-    if (hooks.onAction) onActionHooks.push(hooks.onAction)
-    if (hooks.wrapSubscriptions) subscriptionWraps.push(hooks.wrapSubscriptions)
-    if (hooks.wrapInitialState) initialStateWraps.push(hooks.wrapInitialState)
-    if (hooks.wrapReducers) reducerWraps.push(hooks.wrapReducers)
-    if (hooks.wrapEffects) effectWraps.push(hooks.wrapEffects)
-    if (hooks.models) hooks.models.forEach(setModel)
-  }
-
-  // push a model to be initiated
-  // obj -> null
-  function setModel (model) {
-    assert.equal(typeof model, 'object', 'barracks.store.model: model should be an object')
-    models.push(model)
-  }
-
-  // get the current state from the store
-  // obj? -> obj
-  function getState (opts) {
-    opts = opts || {}
-    assert.equal(typeof opts, 'object', 'barracks.store.state: opts should be an object')
-
-    var state = opts.state
-    if (!opts.state && opts.freeze === false) return xtend(_state)
-    else if (!opts.state) return Object.freeze(xtend(_state))
-    assert.equal(typeof state, 'object', 'barracks.store.state: state should be an object')
-
-    var namespaces = []
-    var newState = {}
-
-    // apply all fields from the model, and namespaced fields from the passed
-    // in state
-    models.forEach(function (model) {
-      var ns = model.namespace
-      namespaces.push(ns)
-      var modelState = model.state || {}
-      if (ns) {
-        newState[ns] = newState[ns] || {}
-        apply(ns, modelState, newState)
-        newState[ns] = xtend(newState[ns], state[ns])
-      } else {
-        mutate(newState, modelState)
-      }
-    })
-
-    // now apply all fields that weren't namespaced from the passed in state
-    Object.keys(state).forEach(function (key) {
-      if (namespaces.indexOf(key) !== -1) return
-      newState[key] = state[key]
-    })
-
-    var tmpState = xtend(_state, xtend(state, newState))
-    var wrappedState = wrapHook(tmpState, initialStateWraps)
-
-    return (opts.freeze === false)
-      ? wrappedState
-      : Object.freeze(wrappedState)
-  }
-
-  // initialize the store hooks, get the send() function
-  // obj? -> fn
-  function start (opts) {
-    opts = opts || {}
-    assert.equal(typeof opts, 'object', 'barracks.store.start: opts should be undefined or an object')
-
-    // register values from the models
-    models.forEach(function (model) {
-      var ns = model.namespace
-      if (!stateCalled && model.state && opts.state !== false) {
-        var modelState = model.state || {}
-        if (ns) {
-          _state[ns] = _state[ns] || {}
-          apply(ns, modelState, _state)
+function defaultClearTimeout () {
+    throw new Error('clearTimeout has not been defined');
+}
+(function () {
+    try {
+        if (typeof setTimeout === 'function') {
+            cachedSetTimeout = setTimeout;
         } else {
-          mutate(_state, modelState)
+            cachedSetTimeout = defaultSetTimout;
         }
-      }
-      if (!reducersCalled && model.reducers && opts.reducers !== false) {
-        apply(ns, model.reducers, reducers, function (cb) {
-          return wrapHook(cb, reducerWraps)
-        })
-      }
-      if (!effectsCalled && model.effects && opts.effects !== false) {
-        apply(ns, model.effects, effects, function (cb) {
-          return wrapHook(cb, effectWraps)
-        })
-      }
-      if (!subsCalled && model.subscriptions && opts.subscriptions !== false) {
-        apply(ns, model.subscriptions, subscriptions, function (cb, key) {
-          var send = createSend('subscription: ' + (ns ? ns + ':' + key : key))
-          cb = wrapHook(cb, subscriptionWraps)
-          cb(send, function (err) {
-            applyHook(onErrorHooks, err, _state, createSend)
-          })
-          return cb
-        })
-      }
-    })
-
-    // the state wrap is special because we want to operate on the full
-    // state rather than indvidual chunks, so we apply it outside the loop
-    if (!stateCalled && opts.state !== false) {
-      _state = wrapHook(_state, initialStateWraps)
+    } catch (e) {
+        cachedSetTimeout = defaultSetTimout;
     }
-
-    if (!opts.noSubscriptions) subsCalled = true
-    if (!opts.noReducers) reducersCalled = true
-    if (!opts.noEffects) effectsCalled = true
-    if (!opts.noState) stateCalled = true
-
-    if (!onErrorHooks.length) onErrorHooks.push(wrapOnError(defaultOnError))
-
-    return createSend
-
-    // call an action from a view
-    // (str, bool?) -> (str, any?, fn?) -> null
-    function createSend (selfName, callOnError) {
-      assert.equal(typeof selfName, 'string', 'barracks.store.start.createSend: selfName should be a string')
-      assert.ok(!callOnError || typeof callOnError === 'boolean', 'barracks.store.start.send: callOnError should be undefined or a boolean')
-
-      return function send (name, data, cb) {
-        if (!cb && !callOnError) {
-          cb = data
-          data = null
-        }
-        data = (typeof data === 'undefined' ? null : data)
-
-        assert.equal(typeof name, 'string', 'barracks.store.start.send: name should be a string')
-        assert.ok(!cb || typeof cb === 'function', 'barracks.store.start.send: cb should be a function')
-
-        var done = callOnError ? onErrorCallback : cb
-        _send(name, data, selfName, done)
-
-        function onErrorCallback (err) {
-          err = err || null
-          if (err) {
-            applyHook(onErrorHooks, err, _state, function createSend (selfName) {
-              return function send (name, data) {
-                assert.equal(typeof name, 'string', 'barracks.store.start.send: name should be a string')
-                data = (typeof data === 'undefined' ? null : data)
-                _send(name, data, selfName, done)
-              }
-            })
-          }
-        }
-      }
-    }
-
-    // call an action
-    // (str, str, any, fn) -> null
-    function _send (name, data, caller, cb) {
-      if (stopped) return
-
-      assert.equal(typeof name, 'string', 'barracks._send: name should be a string')
-      assert.equal(typeof caller, 'string', 'barracks._send: caller should be a string')
-      assert.equal(typeof cb, 'function', 'barracks._send: cb should be a function')
-
-      ;(tick(function () {
-        var reducersCalled = false
-        var effectsCalled = false
-        var newState = xtend(_state)
-
-        if (onActionHooks.length) {
-          applyHook(onActionHooks, _state, data, name, caller, createSend)
-        }
-
-        // validate if a namespace exists. Namespaces are delimited by ':'.
-        var actionName = name
-        if (/:/.test(name)) {
-          var arr = name.split(':')
-          var ns = arr.shift()
-          actionName = arr.join(':')
-        }
-
-        var _reducers = ns ? reducers[ns] : reducers
-        if (_reducers && _reducers[actionName]) {
-          if (ns) {
-            var reducedState = _reducers[actionName](_state[ns], data)
-            newState[ns] = xtend(_state[ns], reducedState)
-          } else {
-            mutate(newState, reducers[actionName](_state, data))
-          }
-          reducersCalled = true
-          if (onStateChangeHooks.length) {
-            applyHook(onStateChangeHooks, newState, data, _state, actionName, createSend)
-          }
-          _state = newState
-          cb(null, newState)
-        }
-
-        var _effects = ns ? effects[ns] : effects
-        if (!reducersCalled && _effects && _effects[actionName]) {
-          var send = createSend('effect: ' + name)
-          if (ns) _effects[actionName](_state[ns], data, send, cb)
-          else _effects[actionName](_state, data, send, cb)
-          effectsCalled = true
-        }
-
-        if (!reducersCalled && !effectsCalled) {
-          throw new Error('Could not find action ' + actionName)
-        }
-      }))()
-    }
-  }
-
-  // stop an app, essentially turns
-  // all send() calls into no-ops.
-  // () -> null
-  function stop () {
-    stopped = true
-  }
-}
-
-// compose an object conditionally
-// optionally contains a namespace
-// which is used to nest properties.
-// (str, obj, obj, fn?) -> null
-function apply (ns, source, target, wrap) {
-  if (ns && !target[ns]) target[ns] = {}
-  Object.keys(source).forEach(function (key) {
-    var cb = wrap ? wrap(source[key], key) : source[key]
-    if (ns) target[ns][key] = cb
-    else target[key] = cb
-  })
-}
-
-// handle errors all the way at the top of the trace
-// err? -> null
-function defaultOnError (err) {
-  throw err
-}
-
-function wrapOnError (onError) {
-  return function onErrorWrap (err, state, createSend) {
-    if (err) onError(err, state, createSend)
-  }
-}
-
-// take a apply an array of transforms onto a value. The new value
-// must be returned synchronously from the transform
-// (any, [fn]) -> any
-function wrapHook (value, transforms) {
-  transforms.forEach(function (transform) {
-    value = transform(value)
-  })
-  return value
-}
-
-},{"./apply-hook":"/Users/lrlna/developer/cellular-automata/node_modules/barracks/apply-hook.js","assert":"/Users/lrlna/developer/cellular-automata/node_modules/assert/assert.js","nanotick":"/Users/lrlna/developer/cellular-automata/node_modules/nanotick/index.js","xtend":"/Users/lrlna/developer/cellular-automata/node_modules/xtend/immutable.js","xtend/mutable":"/Users/lrlna/developer/cellular-automata/node_modules/xtend/mutable.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/bel/index.js":[function(require,module,exports){
-var document = require('global/document')
-var hyperx = require('hyperx')
-var onload = require('on-load')
-
-var SVGNS = 'http://www.w3.org/2000/svg'
-var XLINKNS = 'http://www.w3.org/1999/xlink'
-
-var BOOL_PROPS = {
-  autofocus: 1,
-  checked: 1,
-  defaultchecked: 1,
-  disabled: 1,
-  formnovalidate: 1,
-  indeterminate: 1,
-  readonly: 1,
-  required: 1,
-  selected: 1,
-  willvalidate: 1
-}
-var SVG_TAGS = [
-  'svg',
-  'altGlyph', 'altGlyphDef', 'altGlyphItem', 'animate', 'animateColor',
-  'animateMotion', 'animateTransform', 'circle', 'clipPath', 'color-profile',
-  'cursor', 'defs', 'desc', 'ellipse', 'feBlend', 'feColorMatrix',
-  'feComponentTransfer', 'feComposite', 'feConvolveMatrix', 'feDiffuseLighting',
-  'feDisplacementMap', 'feDistantLight', 'feFlood', 'feFuncA', 'feFuncB',
-  'feFuncG', 'feFuncR', 'feGaussianBlur', 'feImage', 'feMerge', 'feMergeNode',
-  'feMorphology', 'feOffset', 'fePointLight', 'feSpecularLighting',
-  'feSpotLight', 'feTile', 'feTurbulence', 'filter', 'font', 'font-face',
-  'font-face-format', 'font-face-name', 'font-face-src', 'font-face-uri',
-  'foreignObject', 'g', 'glyph', 'glyphRef', 'hkern', 'image', 'line',
-  'linearGradient', 'marker', 'mask', 'metadata', 'missing-glyph', 'mpath',
-  'path', 'pattern', 'polygon', 'polyline', 'radialGradient', 'rect',
-  'set', 'stop', 'switch', 'symbol', 'text', 'textPath', 'title', 'tref',
-  'tspan', 'use', 'view', 'vkern'
-]
-
-function belCreateElement (tag, props, children) {
-  var el
-
-  // If an svg tag, it needs a namespace
-  if (SVG_TAGS.indexOf(tag) !== -1) {
-    props.namespace = SVGNS
-  }
-
-  // If we are using a namespace
-  var ns = false
-  if (props.namespace) {
-    ns = props.namespace
-    delete props.namespace
-  }
-
-  // Create the element
-  if (ns) {
-    el = document.createElementNS(ns, tag)
-  } else {
-    el = document.createElement(tag)
-  }
-
-  // If adding onload events
-  if (props.onload || props.onunload) {
-    var load = props.onload || function () {}
-    var unload = props.onunload || function () {}
-    onload(el, function belOnload () {
-      load(el)
-    }, function belOnunload () {
-      unload(el)
-    },
-    // We have to use non-standard `caller` to find who invokes `belCreateElement`
-    belCreateElement.caller.caller.caller)
-    delete props.onload
-    delete props.onunload
-  }
-
-  // Create the properties
-  for (var p in props) {
-    if (props.hasOwnProperty(p)) {
-      var key = p.toLowerCase()
-      var val = props[p]
-      // Normalize className
-      if (key === 'classname') {
-        key = 'class'
-        p = 'class'
-      }
-      // The for attribute gets transformed to htmlFor, but we just set as for
-      if (p === 'htmlFor') {
-        p = 'for'
-      }
-      // If a property is boolean, set itself to the key
-      if (BOOL_PROPS[key]) {
-        if (val === 'true') val = key
-        else if (val === 'false') continue
-      }
-      // If a property prefers being set directly vs setAttribute
-      if (key.slice(0, 2) === 'on') {
-        el[p] = val
-      } else {
-        if (ns) {
-          if (p === 'xlink:href') {
-            el.setAttributeNS(XLINKNS, p, val)
-          } else if (/^xmlns($|:)/i.test(p)) {
-            // skip xmlns definitions
-          } else {
-            el.setAttributeNS(null, p, val)
-          }
+    try {
+        if (typeof clearTimeout === 'function') {
+            cachedClearTimeout = clearTimeout;
         } else {
-          el.setAttribute(p, val)
+            cachedClearTimeout = defaultClearTimeout;
         }
-      }
+    } catch (e) {
+        cachedClearTimeout = defaultClearTimeout;
     }
-  }
-
-  function appendChild (childs) {
-    if (!Array.isArray(childs)) return
-    for (var i = 0; i < childs.length; i++) {
-      var node = childs[i]
-      if (Array.isArray(node)) {
-        appendChild(node)
-        continue
-      }
-
-      if (typeof node === 'number' ||
-        typeof node === 'boolean' ||
-        node instanceof Date ||
-        node instanceof RegExp) {
-        node = node.toString()
-      }
-
-      if (typeof node === 'string') {
-        if (el.lastChild && el.lastChild.nodeName === '#text') {
-          el.lastChild.nodeValue += node
-          continue
+} ())
+function runTimeout(fun) {
+    if (cachedSetTimeout === setTimeout) {
+        //normal enviroments in sane situations
+        return setTimeout(fun, 0);
+    }
+    // if setTimeout wasn't available but was latter defined
+    if ((cachedSetTimeout === defaultSetTimout || !cachedSetTimeout) && setTimeout) {
+        cachedSetTimeout = setTimeout;
+        return setTimeout(fun, 0);
+    }
+    try {
+        // when when somebody has screwed with setTimeout but no I.E. maddness
+        return cachedSetTimeout(fun, 0);
+    } catch(e){
+        try {
+            // When we are in I.E. but the script has been evaled so I.E. doesn't trust the global object when called normally
+            return cachedSetTimeout.call(null, fun, 0);
+        } catch(e){
+            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error
+            return cachedSetTimeout.call(this, fun, 0);
         }
-        node = document.createTextNode(node)
-      }
-
-      if (node && node.nodeType) {
-        el.appendChild(node)
-      }
     }
-  }
-  appendChild(children)
 
-  return el
+
+}
+function runClearTimeout(marker) {
+    if (cachedClearTimeout === clearTimeout) {
+        //normal enviroments in sane situations
+        return clearTimeout(marker);
+    }
+    // if clearTimeout wasn't available but was latter defined
+    if ((cachedClearTimeout === defaultClearTimeout || !cachedClearTimeout) && clearTimeout) {
+        cachedClearTimeout = clearTimeout;
+        return clearTimeout(marker);
+    }
+    try {
+        // when when somebody has screwed with setTimeout but no I.E. maddness
+        return cachedClearTimeout(marker);
+    } catch (e){
+        try {
+            // When we are in I.E. but the script has been evaled so I.E. doesn't  trust the global object when called normally
+            return cachedClearTimeout.call(null, marker);
+        } catch (e){
+            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error.
+            // Some versions of I.E. have different rules for clearTimeout vs setTimeout
+            return cachedClearTimeout.call(this, marker);
+        }
+    }
+
+
+
+}
+var queue = [];
+var draining = false;
+var currentQueue;
+var queueIndex = -1;
+
+function cleanUpNextTick() {
+    if (!draining || !currentQueue) {
+        return;
+    }
+    draining = false;
+    if (currentQueue.length) {
+        queue = currentQueue.concat(queue);
+    } else {
+        queueIndex = -1;
+    }
+    if (queue.length) {
+        drainQueue();
+    }
 }
 
-module.exports = hyperx(belCreateElement)
-module.exports.default = module.exports
-module.exports.createElement = belCreateElement
+function drainQueue() {
+    if (draining) {
+        return;
+    }
+    var timeout = runTimeout(cleanUpNextTick);
+    draining = true;
 
-},{"global/document":"/Users/lrlna/developer/cellular-automata/node_modules/global/document.js","hyperx":"/Users/lrlna/developer/cellular-automata/node_modules/hyperx/index.js","on-load":"/Users/lrlna/developer/cellular-automata/node_modules/on-load/index.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/browser-resolve/empty.js":[function(require,module,exports){
+    var len = queue.length;
+    while(len) {
+        currentQueue = queue;
+        queue = [];
+        while (++queueIndex < len) {
+            if (currentQueue) {
+                currentQueue[queueIndex].run();
+            }
+        }
+        queueIndex = -1;
+        len = queue.length;
+    }
+    currentQueue = null;
+    draining = false;
+    runClearTimeout(timeout);
+}
 
-},{}],"/Users/lrlna/developer/cellular-automata/node_modules/browserify/lib/_empty.js":[function(require,module,exports){
-arguments[4]["/Users/lrlna/developer/cellular-automata/node_modules/browser-resolve/empty.js"][0].apply(exports,arguments)
+process.nextTick = function (fun) {
+    var args = new Array(arguments.length - 1);
+    if (arguments.length > 1) {
+        for (var i = 1; i < arguments.length; i++) {
+            args[i - 1] = arguments[i];
+        }
+    }
+    queue.push(new Item(fun, args));
+    if (queue.length === 1 && !draining) {
+        runTimeout(drainQueue);
+    }
+};
+
+// v8 likes predictible objects
+function Item(fun, array) {
+    this.fun = fun;
+    this.array = array;
+}
+Item.prototype.run = function () {
+    this.fun.apply(null, this.array);
+};
+process.title = 'browser';
+process.browser = true;
+process.env = {};
+process.argv = [];
+process.version = ''; // empty string to avoid regexp issues
+process.versions = {};
+
+function noop() {}
+
+process.on = noop;
+process.addListener = noop;
+process.once = noop;
+process.off = noop;
+process.removeListener = noop;
+process.removeAllListeners = noop;
+process.emit = noop;
+
+process.binding = function (name) {
+    throw new Error('process.binding is not supported');
+};
+
+process.cwd = function () { return '/' };
+process.chdir = function (dir) {
+    throw new Error('process.chdir is not supported');
+};
+process.umask = function() { return 0; };
+
 },{}],"/Users/lrlna/developer/cellular-automata/node_modules/choo/html.js":[function(require,module,exports){
 module.exports = require('yo-yo')
 
@@ -1122,7 +1304,7 @@ function createLocationModel (opts) {
   }
 }
 
-},{"assert":"/Users/lrlna/developer/cellular-automata/node_modules/assert/assert.js","barracks":"/Users/lrlna/developer/cellular-automata/node_modules/barracks/index.js","nanoraf":"/Users/lrlna/developer/cellular-automata/node_modules/nanoraf/index.js","sheet-router":"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/index.js","sheet-router/create-location":"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/create-location.js","sheet-router/history":"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/history.js","sheet-router/href":"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/href.js","sheet-router/walk":"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/walk.js","xtend":"/Users/lrlna/developer/cellular-automata/node_modules/xtend/immutable.js","xtend/mutable":"/Users/lrlna/developer/cellular-automata/node_modules/xtend/mutable.js","yo-yo":"/Users/lrlna/developer/cellular-automata/node_modules/yo-yo/index.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/choo/mount.js":[function(require,module,exports){
+},{"assert":"/Users/lrlna/developer/cellular-automata/node_modules/browserify/node_modules/assert/assert.js","barracks":"/Users/lrlna/developer/cellular-automata/node_modules/barracks/index.js","nanoraf":"/Users/lrlna/developer/cellular-automata/node_modules/nanoraf/index.js","sheet-router":"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/index.js","sheet-router/create-location":"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/create-location.js","sheet-router/history":"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/history.js","sheet-router/href":"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/href.js","sheet-router/walk":"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/walk.js","xtend":"/Users/lrlna/developer/cellular-automata/node_modules/xtend/immutable.js","xtend/mutable":"/Users/lrlna/developer/cellular-automata/node_modules/xtend/mutable.js","yo-yo":"/Users/lrlna/developer/cellular-automata/node_modules/yo-yo/index.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/choo/mount.js":[function(require,module,exports){
 // mount.js
 const documentReady = require('document-ready')
 const assert = require('assert')
@@ -1164,7 +1346,7 @@ function mount (selector, newTree) {
   })
 }
 
-},{"assert":"/Users/lrlna/developer/cellular-automata/node_modules/assert/assert.js","document-ready":"/Users/lrlna/developer/cellular-automata/node_modules/document-ready/index.js","yo-yo":"/Users/lrlna/developer/cellular-automata/node_modules/yo-yo/index.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/document-ready/index.js":[function(require,module,exports){
+},{"assert":"/Users/lrlna/developer/cellular-automata/node_modules/browserify/node_modules/assert/assert.js","document-ready":"/Users/lrlna/developer/cellular-automata/node_modules/document-ready/index.js","yo-yo":"/Users/lrlna/developer/cellular-automata/node_modules/yo-yo/index.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/document-ready/index.js":[function(require,module,exports){
 'use strict'
 
 var document = require('global/document')
@@ -1502,7 +1684,32 @@ var closeRE = RegExp('^(' + [
 ].join('|') + ')(?:[\.#][a-zA-Z0-9\u007F-\uFFFF_:-]+)*$')
 function selfClosing (tag) { return closeRE.test(tag) }
 
-},{"hyperscript-attribute-to-property":"/Users/lrlna/developer/cellular-automata/node_modules/hyperscript-attribute-to-property/index.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/morphdom/src/index.js":[function(require,module,exports){
+},{"hyperscript-attribute-to-property":"/Users/lrlna/developer/cellular-automata/node_modules/hyperscript-attribute-to-property/index.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/inherits/inherits_browser.js":[function(require,module,exports){
+if (typeof Object.create === 'function') {
+  // implementation from standard node.js 'util' module
+  module.exports = function inherits(ctor, superCtor) {
+    ctor.super_ = superCtor
+    ctor.prototype = Object.create(superCtor.prototype, {
+      constructor: {
+        value: ctor,
+        enumerable: false,
+        writable: true,
+        configurable: true
+      }
+    });
+  };
+} else {
+  // old school shim for old browsers
+  module.exports = function inherits(ctor, superCtor) {
+    ctor.super_ = superCtor
+    var TempCtor = function () {}
+    TempCtor.prototype = superCtor.prototype
+    ctor.prototype = new TempCtor()
+    ctor.prototype.constructor = ctor
+  }
+}
+
+},{}],"/Users/lrlna/developer/cellular-automata/node_modules/morphdom/src/index.js":[function(require,module,exports){
 'use strict';
 // Create a range object for efficently rendering strings to elements.
 var range;
@@ -1605,6 +1812,26 @@ var specialElHandlers = {
             }
 
             fromEl.firstChild.nodeValue = newValue;
+        }
+    },
+    SELECT: function(fromEl, toEl) {
+        if (!hasAttributeNS(toEl, null, 'multiple')) {
+            var selectedIndex = -1;
+            var i = 0;
+            var curChild = toEl.firstChild;
+            while(curChild) {
+                var nodeName = curChild.nodeName;
+                if (nodeName && nodeName.toUpperCase() === 'OPTION') {
+                    if (hasAttributeNS(curChild, null, 'selected')) {
+                        selectedIndex = i;
+                        break;
+                    }
+                    i++;
+                }
+                curChild = curChild.nextSibling;
+            }
+
+            fromEl.selectedIndex = i;
         }
     }
 };
@@ -2208,7 +2435,7 @@ function nanoraf (render, raf) {
   }
 }
 
-},{"assert":"/Users/lrlna/developer/cellular-automata/node_modules/assert/assert.js","global/window":"/Users/lrlna/developer/cellular-automata/node_modules/global/window.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/nanotick/index.js":[function(require,module,exports){
+},{"assert":"/Users/lrlna/developer/cellular-automata/node_modules/browserify/node_modules/assert/assert.js","global/window":"/Users/lrlna/developer/cellular-automata/node_modules/global/window.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/nanotick/index.js":[function(require,module,exports){
 (function (process){
 var assert = require('assert')
 
@@ -2268,7 +2495,7 @@ function nanotick () {
 }
 
 }).call(this,require('_process'))
-},{"_process":"/Users/lrlna/developer/cellular-automata/node_modules/process/browser.js","assert":"/Users/lrlna/developer/cellular-automata/node_modules/assert/assert.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/olivaw/index.js":[function(require,module,exports){
+},{"_process":"/Users/lrlna/developer/cellular-automata/node_modules/browserify/node_modules/process/browser.js","assert":"/Users/lrlna/developer/cellular-automata/node_modules/browserify/node_modules/assert/assert.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/olivaw/index.js":[function(require,module,exports){
 var assert = require('assert')
 
 module.exports = Automata
@@ -2397,7 +2624,7 @@ function Automata () {
   return ctx
 }
 
-},{"assert":"/Users/lrlna/developer/cellular-automata/node_modules/assert/assert.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/on-load/index.js":[function(require,module,exports){
+},{"assert":"/Users/lrlna/developer/cellular-automata/node_modules/browserify/node_modules/assert/assert.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/on-load/index.js":[function(require,module,exports){
 /* global MutationObserver */
 var document = require('global/document')
 var window = require('global/window')
@@ -2486,189 +2713,7 @@ function eachMutation (nodes, fn) {
   }
 }
 
-},{"global/document":"/Users/lrlna/developer/cellular-automata/node_modules/global/document.js","global/window":"/Users/lrlna/developer/cellular-automata/node_modules/global/window.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/process/browser.js":[function(require,module,exports){
-// shim for using process in browser
-var process = module.exports = {};
-
-// cached from whatever global is present so that test runners that stub it
-// don't break things.  But we need to wrap it in a try catch in case it is
-// wrapped in strict mode code which doesn't define any globals.  It's inside a
-// function because try/catches deoptimize in certain engines.
-
-var cachedSetTimeout;
-var cachedClearTimeout;
-
-function defaultSetTimout() {
-    throw new Error('setTimeout has not been defined');
-}
-function defaultClearTimeout () {
-    throw new Error('clearTimeout has not been defined');
-}
-(function () {
-    try {
-        if (typeof setTimeout === 'function') {
-            cachedSetTimeout = setTimeout;
-        } else {
-            cachedSetTimeout = defaultSetTimout;
-        }
-    } catch (e) {
-        cachedSetTimeout = defaultSetTimout;
-    }
-    try {
-        if (typeof clearTimeout === 'function') {
-            cachedClearTimeout = clearTimeout;
-        } else {
-            cachedClearTimeout = defaultClearTimeout;
-        }
-    } catch (e) {
-        cachedClearTimeout = defaultClearTimeout;
-    }
-} ())
-function runTimeout(fun) {
-    if (cachedSetTimeout === setTimeout) {
-        //normal enviroments in sane situations
-        return setTimeout(fun, 0);
-    }
-    // if setTimeout wasn't available but was latter defined
-    if ((cachedSetTimeout === defaultSetTimout || !cachedSetTimeout) && setTimeout) {
-        cachedSetTimeout = setTimeout;
-        return setTimeout(fun, 0);
-    }
-    try {
-        // when when somebody has screwed with setTimeout but no I.E. maddness
-        return cachedSetTimeout(fun, 0);
-    } catch(e){
-        try {
-            // When we are in I.E. but the script has been evaled so I.E. doesn't trust the global object when called normally
-            return cachedSetTimeout.call(null, fun, 0);
-        } catch(e){
-            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error
-            return cachedSetTimeout.call(this, fun, 0);
-        }
-    }
-
-
-}
-function runClearTimeout(marker) {
-    if (cachedClearTimeout === clearTimeout) {
-        //normal enviroments in sane situations
-        return clearTimeout(marker);
-    }
-    // if clearTimeout wasn't available but was latter defined
-    if ((cachedClearTimeout === defaultClearTimeout || !cachedClearTimeout) && clearTimeout) {
-        cachedClearTimeout = clearTimeout;
-        return clearTimeout(marker);
-    }
-    try {
-        // when when somebody has screwed with setTimeout but no I.E. maddness
-        return cachedClearTimeout(marker);
-    } catch (e){
-        try {
-            // When we are in I.E. but the script has been evaled so I.E. doesn't  trust the global object when called normally
-            return cachedClearTimeout.call(null, marker);
-        } catch (e){
-            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error.
-            // Some versions of I.E. have different rules for clearTimeout vs setTimeout
-            return cachedClearTimeout.call(this, marker);
-        }
-    }
-
-
-
-}
-var queue = [];
-var draining = false;
-var currentQueue;
-var queueIndex = -1;
-
-function cleanUpNextTick() {
-    if (!draining || !currentQueue) {
-        return;
-    }
-    draining = false;
-    if (currentQueue.length) {
-        queue = currentQueue.concat(queue);
-    } else {
-        queueIndex = -1;
-    }
-    if (queue.length) {
-        drainQueue();
-    }
-}
-
-function drainQueue() {
-    if (draining) {
-        return;
-    }
-    var timeout = runTimeout(cleanUpNextTick);
-    draining = true;
-
-    var len = queue.length;
-    while(len) {
-        currentQueue = queue;
-        queue = [];
-        while (++queueIndex < len) {
-            if (currentQueue) {
-                currentQueue[queueIndex].run();
-            }
-        }
-        queueIndex = -1;
-        len = queue.length;
-    }
-    currentQueue = null;
-    draining = false;
-    runClearTimeout(timeout);
-}
-
-process.nextTick = function (fun) {
-    var args = new Array(arguments.length - 1);
-    if (arguments.length > 1) {
-        for (var i = 1; i < arguments.length; i++) {
-            args[i - 1] = arguments[i];
-        }
-    }
-    queue.push(new Item(fun, args));
-    if (queue.length === 1 && !draining) {
-        runTimeout(drainQueue);
-    }
-};
-
-// v8 likes predictible objects
-function Item(fun, array) {
-    this.fun = fun;
-    this.array = array;
-}
-Item.prototype.run = function () {
-    this.fun.apply(null, this.array);
-};
-process.title = 'browser';
-process.browser = true;
-process.env = {};
-process.argv = [];
-process.version = ''; // empty string to avoid regexp issues
-process.versions = {};
-
-function noop() {}
-
-process.on = noop;
-process.addListener = noop;
-process.once = noop;
-process.off = noop;
-process.removeListener = noop;
-process.removeAllListeners = noop;
-process.emit = noop;
-
-process.binding = function (name) {
-    throw new Error('process.binding is not supported');
-};
-
-process.cwd = function () { return '/' };
-process.chdir = function (dir) {
-    throw new Error('process.chdir is not supported');
-};
-process.umask = function() { return 0; };
-
-},{}],"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/_pathname.js":[function(require,module,exports){
+},{"global/document":"/Users/lrlna/developer/cellular-automata/node_modules/global/document.js","global/window":"/Users/lrlna/developer/cellular-automata/node_modules/global/window.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/_pathname.js":[function(require,module,exports){
 /* eslint-disable no-useless-escape */
 const electron = '^(file:\/\/|\/)(.*\.html?\/?)?'
 const protocol = '^(http(s)?(:\/\/))?(www\.)?'
@@ -2746,7 +2791,7 @@ function createLocation (state, patch) {
   }
 }
 
-},{"./qs":"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/qs.js","assert":"/Users/lrlna/developer/cellular-automata/node_modules/assert/assert.js","global/document":"/Users/lrlna/developer/cellular-automata/node_modules/global/document.js","xtend":"/Users/lrlna/developer/cellular-automata/node_modules/xtend/immutable.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/history.js":[function(require,module,exports){
+},{"./qs":"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/qs.js","assert":"/Users/lrlna/developer/cellular-automata/node_modules/browserify/node_modules/assert/assert.js","global/document":"/Users/lrlna/developer/cellular-automata/node_modules/global/document.js","xtend":"/Users/lrlna/developer/cellular-automata/node_modules/xtend/immutable.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/history.js":[function(require,module,exports){
 const document = require('global/document')
 const window = require('global/window')
 const assert = require('assert')
@@ -2768,7 +2813,7 @@ function history (cb) {
   }
 }
 
-},{"assert":"/Users/lrlna/developer/cellular-automata/node_modules/assert/assert.js","global/document":"/Users/lrlna/developer/cellular-automata/node_modules/global/document.js","global/window":"/Users/lrlna/developer/cellular-automata/node_modules/global/window.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/href.js":[function(require,module,exports){
+},{"assert":"/Users/lrlna/developer/cellular-automata/node_modules/browserify/node_modules/assert/assert.js","global/document":"/Users/lrlna/developer/cellular-automata/node_modules/global/document.js","global/window":"/Users/lrlna/developer/cellular-automata/node_modules/global/window.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/href.js":[function(require,module,exports){
 const window = require('global/window')
 const assert = require('assert')
 
@@ -2811,7 +2856,7 @@ function href (cb, root) {
   }
 }
 
-},{"./qs":"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/qs.js","assert":"/Users/lrlna/developer/cellular-automata/node_modules/assert/assert.js","global/window":"/Users/lrlna/developer/cellular-automata/node_modules/global/window.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/index.js":[function(require,module,exports){
+},{"./qs":"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/qs.js","assert":"/Users/lrlna/developer/cellular-automata/node_modules/browserify/node_modules/assert/assert.js","global/window":"/Users/lrlna/developer/cellular-automata/node_modules/global/window.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/index.js":[function(require,module,exports){
 const window = require('global/window')
 const pathname = require('./_pathname')
 const wayfarer = require('wayfarer')
@@ -2918,7 +2963,7 @@ function thunkify (cb) {
   }
 }
 
-},{"./_pathname":"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/_pathname.js","assert":"/Users/lrlna/developer/cellular-automata/node_modules/assert/assert.js","global/window":"/Users/lrlna/developer/cellular-automata/node_modules/global/window.js","wayfarer":"/Users/lrlna/developer/cellular-automata/node_modules/wayfarer/index.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/qs.js":[function(require,module,exports){
+},{"./_pathname":"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/_pathname.js","assert":"/Users/lrlna/developer/cellular-automata/node_modules/browserify/node_modules/assert/assert.js","global/window":"/Users/lrlna/developer/cellular-automata/node_modules/global/window.js","wayfarer":"/Users/lrlna/developer/cellular-automata/node_modules/wayfarer/index.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/sheet-router/qs.js":[function(require,module,exports){
 const window = require('global/window')
 
 const decodeURIComponent = window.decodeURIComponent
@@ -2951,32 +2996,7 @@ function walkSheetRouter (router, cb) {
   return walk(router, cb)
 }
 
-},{"assert":"/Users/lrlna/developer/cellular-automata/node_modules/assert/assert.js","wayfarer/walk":"/Users/lrlna/developer/cellular-automata/node_modules/wayfarer/walk.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/util/node_modules/inherits/inherits_browser.js":[function(require,module,exports){
-if (typeof Object.create === 'function') {
-  // implementation from standard node.js 'util' module
-  module.exports = function inherits(ctor, superCtor) {
-    ctor.super_ = superCtor
-    ctor.prototype = Object.create(superCtor.prototype, {
-      constructor: {
-        value: ctor,
-        enumerable: false,
-        writable: true,
-        configurable: true
-      }
-    });
-  };
-} else {
-  // old school shim for old browsers
-  module.exports = function inherits(ctor, superCtor) {
-    ctor.super_ = superCtor
-    var TempCtor = function () {}
-    TempCtor.prototype = superCtor.prototype
-    ctor.prototype = new TempCtor()
-    ctor.prototype.constructor = ctor
-  }
-}
-
-},{}],"/Users/lrlna/developer/cellular-automata/node_modules/util/support/isBufferBrowser.js":[function(require,module,exports){
+},{"assert":"/Users/lrlna/developer/cellular-automata/node_modules/browserify/node_modules/assert/assert.js","wayfarer/walk":"/Users/lrlna/developer/cellular-automata/node_modules/wayfarer/walk.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/util/support/isBufferBrowser.js":[function(require,module,exports){
 module.exports = function isBuffer(arg) {
   return arg && typeof arg === 'object'
     && typeof arg.copy === 'function'
@@ -3573,7 +3593,7 @@ function hasOwnProperty(obj, prop) {
 }
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./support/isBuffer":"/Users/lrlna/developer/cellular-automata/node_modules/util/support/isBufferBrowser.js","_process":"/Users/lrlna/developer/cellular-automata/node_modules/process/browser.js","inherits":"/Users/lrlna/developer/cellular-automata/node_modules/util/node_modules/inherits/inherits_browser.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/wayfarer/index.js":[function(require,module,exports){
+},{"./support/isBuffer":"/Users/lrlna/developer/cellular-automata/node_modules/util/support/isBufferBrowser.js","_process":"/Users/lrlna/developer/cellular-automata/node_modules/browserify/node_modules/process/browser.js","inherits":"/Users/lrlna/developer/cellular-automata/node_modules/inherits/inherits_browser.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/wayfarer/index.js":[function(require,module,exports){
 const assert = require('assert')
 const trie = require('./trie')
 
@@ -3637,7 +3657,7 @@ function Wayfarer (dft) {
   }
 }
 
-},{"./trie":"/Users/lrlna/developer/cellular-automata/node_modules/wayfarer/trie.js","assert":"/Users/lrlna/developer/cellular-automata/node_modules/assert/assert.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/wayfarer/trie.js":[function(require,module,exports){
+},{"./trie":"/Users/lrlna/developer/cellular-automata/node_modules/wayfarer/trie.js","assert":"/Users/lrlna/developer/cellular-automata/node_modules/browserify/node_modules/assert/assert.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/wayfarer/trie.js":[function(require,module,exports){
 const mutate = require('xtend/mutable')
 const assert = require('assert')
 const xtend = require('xtend')
@@ -3754,7 +3774,7 @@ Trie.prototype.mount = function (route, trie) {
   }
 }
 
-},{"assert":"/Users/lrlna/developer/cellular-automata/node_modules/assert/assert.js","xtend":"/Users/lrlna/developer/cellular-automata/node_modules/xtend/immutable.js","xtend/mutable":"/Users/lrlna/developer/cellular-automata/node_modules/xtend/mutable.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/wayfarer/walk.js":[function(require,module,exports){
+},{"assert":"/Users/lrlna/developer/cellular-automata/node_modules/browserify/node_modules/assert/assert.js","xtend":"/Users/lrlna/developer/cellular-automata/node_modules/xtend/immutable.js","xtend/mutable":"/Users/lrlna/developer/cellular-automata/node_modules/xtend/mutable.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/wayfarer/walk.js":[function(require,module,exports){
 const assert = require('assert')
 
 module.exports = walk
@@ -3787,7 +3807,7 @@ function walk (router, transform) {
   })('', trie.trie)
 }
 
-},{"assert":"/Users/lrlna/developer/cellular-automata/node_modules/assert/assert.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/xtend/immutable.js":[function(require,module,exports){
+},{"assert":"/Users/lrlna/developer/cellular-automata/node_modules/browserify/node_modules/assert/assert.js"}],"/Users/lrlna/developer/cellular-automata/node_modules/xtend/immutable.js":[function(require,module,exports){
 module.exports = extend
 
 var hasOwnProperty = Object.prototype.hasOwnProperty;
