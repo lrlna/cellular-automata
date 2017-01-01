@@ -67,5 +67,5 @@ function getCell (cell) {
   return html`<div class=${cell.state}></div>`
 }
 
-app.router(['/', mainView])
+app.router(['/cellular-automata', mainView])
 mount('body', app.start())
