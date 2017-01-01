@@ -7,7 +7,7 @@
     "build": "bankai build",
     "start": "bankai start",
     "test": "standard",
-    "publish": "npm build && gh-pages -d dist/"
+    "publish": "npm run build && gh-pages -d dist/"
   },
   "repository": {
     "type": "git",
